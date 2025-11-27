@@ -1,0 +1,8 @@
+# Configurações de Wi-Fi
+CONFIG_WIFI_SSID="iot"
+CONFIG_WIFI_PASSWORD="123mudar"
+
+# Configurações de MQTT
+# O broker padrão do código-fonte é "mqtt://10.0.2.2:1883".
+# O ESP-IDF usa a porta 1883 por padrão, então apenas o IP é necessário.
+CONFIG_MQTT_BROKER_URI="mqtt://192.168.0.1:1883"

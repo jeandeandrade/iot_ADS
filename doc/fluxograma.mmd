@@ -1,0 +1,91 @@
+%%{init: {"flowchart": {"defaultRenderer": "elk"}} }%%
+graph TD
+    %% Definição de Estilos
+    classDef init fill:#e1f5fe,stroke:#01579b,stroke-width:2px;
+    classDef task fill:#fff9c4,stroke:#fbc02d,stroke-width:2px;
+    classDef hw fill:#e0e0e0,stroke:#424242,stroke-width:2px,stroke-dasharray: 5 5;
+    classDef ext fill:#dcedc8,stroke:#33691e,stroke-width:2px;
+
+    %% --- Hardware e Externo ---
+    subgraph Externo [Mundo Externo]
+        Pot[Potenciômetro<br/>GPIO 34]:::hw
+        WiFi_AP[Roteador WiFi]:::ext
+        Broker[Broker MQTT<br/>Mosquitto]:::ext
+    end
+
+    %% --- Fase 1: Inicialização ---
+    subgraph Setup [Fase 1: Inicialização - app_main]
+        Start((Início)):::init --> InitNVS[Init NVS Flash]:::init
+        InitNVS --> InitNet[Init WiFi & Netif]:::init
+        InitNet --> WaitIP{Conectou WiFi?}:::init
+        
+        WaitIP -- Não --> WaitIP
+        WaitIP -- Sim --> InitMQTT[Init Cliente MQTT]:::init
+        
+        InitMQTT --> CreateSys[Criar Tasks do Sistema<br/>Telemetria, Watchdog]:::init
+        CreateSys --> CreateApp[Criar Tasks da App<br/>Monitor, Custom]:::init
+        
+        CreateApp --> Scheduler[FreeRTOS Scheduler<br/>Assume o Controle]:::init
+    end
+
+    %% --- Fase 2: Execução Concorrente ---
+    subgraph Runtime [Fase 2: Execução Concorrente - Loop Infinito]
+        direction TB
+
+        %% Task de Telemetria
+        subgraph T_Telem [Task Telemetria - Prio 5]
+            direction TB
+            ReadADC[Ler ADC1 Ch6]:::task
+            CalcTemp[Converter p/ Temp]:::task
+            PubTelem[Publicar JSON<br/>MQTT]:::task
+            DelayTelem[Delay 10s]:::task
+            
+            ReadADC --> CalcTemp --> PubTelem --> DelayTelem --> ReadADC
+        end
+
+        %% Task de Monitoramento
+        subgraph T_Mon [Task Monitoramento - Prio 3]
+            direction TB
+            CheckStats[Obter Estatísticas]:::task
+            LogSerial[Log no Monitor Serial]:::task
+            CheckHealth[Verificar Heap/RSSI]:::task
+            DelayMon[Delay 60s]:::task
+
+            CheckStats --> LogSerial --> CheckHealth --> DelayMon --> CheckStats
+        end
+
+        %% Task Customizada
+        subgraph T_Cust [Task Customizada - Prio 2]
+            direction TB
+            GenMsg[Gerar Msg Custom]:::task
+            PubCust[Publicar MQTT]:::task
+            DelayCust[Delay 5min]:::task
+
+            GenMsg --> PubCust --> DelayCust --> GenMsg
+        end
+
+        %% Watchdog WiFi
+        subgraph T_WDT [WiFi Watchdog - Prio 4]
+            direction TB
+            CheckConn{Conectado?}:::task
+            Reconn[Reconectar]:::task
+            DelayWDT[Delay 30s]:::task
+
+            CheckConn -- Sim --> DelayWDT
+            CheckConn -- Não --> Reconn --> DelayWDT
+            DelayWDT --> CheckConn
+        end
+    end
+
+    %% --- Conexões Lógicas ---
+    Scheduler -.-> T_Telem
+    Scheduler -.-> T_Mon
+    Scheduler -.-> T_Cust
+    Scheduler -.-> T_WDT
+
+    %% --- Conexões Físicas/Lógicas Externas ---
+    InitNet -.-> WiFi_AP
+    Reconn -.-> WiFi_AP
+    Pot -- Tensão 0-3.3V --> ReadADC
+    PubTelem -- Tópico: telemetria --> Broker
+    PubCust -- Tópico: custom --> Broker
